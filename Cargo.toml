@@ -2,6 +2,10 @@
 name = "tpdf"
 version = "0.1.0"
 edition = "2021"
+description = "A fast terminal PDF viewer with image protocol support"
+license = "GPL-3.0-only"
+keywords = ["pdf", "terminal", "viewer", "tui"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 ratatui = { version = "0.30", features = ["crossterm"] }
@@ -15,3 +19,18 @@ mimalloc = "0.1"
 [profile.release]
 lto = "fat"
 codegen-units = 1
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# Numeric casts are pervasive in graphics/TUI code and always bounded by context
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+# False positive on App — bools are independent flags, not a state machine
+struct_excessive_bools = "allow"
+# Not useful for private helpers that take small Copy-like enums
+needless_pass_by_value = "allow"
+# input.rs functions can't be const due to match guards
+missing_const_for_fn = "allow"

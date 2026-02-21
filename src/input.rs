@@ -2,12 +2,11 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::app::Message;
 
-/// Normal-mode key mapping.
 pub fn key_to_message(key: KeyEvent) -> Option<Message> {
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc => Some(Message::Quit),
 
-        KeyCode::Right | KeyCode::Char('l') | KeyCode::Char(' ') | KeyCode::PageDown => {
+        KeyCode::Right | KeyCode::Char('l' | ' ') | KeyCode::PageDown => {
             Some(Message::NextPage)
         }
         KeyCode::Left | KeyCode::Char('h') | KeyCode::PageUp => Some(Message::PrevPage),
@@ -15,7 +14,7 @@ pub fn key_to_message(key: KeyEvent) -> Option<Message> {
         KeyCode::Char('g') | KeyCode::Home => Some(Message::FirstPage),
         KeyCode::Char('G') | KeyCode::End => Some(Message::LastPage),
 
-        KeyCode::Char('+') | KeyCode::Char('=') => Some(Message::ZoomIn),
+        KeyCode::Char('+' | '=') => Some(Message::ZoomIn),
         KeyCode::Char('-') => Some(Message::ZoomOut),
         KeyCode::Char('0') => Some(Message::ZoomReset),
 
@@ -33,7 +32,6 @@ pub fn key_to_message(key: KeyEvent) -> Option<Message> {
     }
 }
 
-/// Goto-mode key mapping (page number input).
 pub fn key_to_goto_message(key: KeyEvent) -> Option<Message> {
     match key.code {
         KeyCode::Char(c) if c.is_ascii_digit() => Some(Message::GotoInput(c)),

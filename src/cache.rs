@@ -4,8 +4,6 @@ use image::DynamicImage;
 use ratatui::layout::Rect;
 use ratatui_image::{picker::Picker, protocol::Protocol, FilterType, Resize};
 
-use crate::dark;
-
 pub struct PageCache {
     images: HashMap<usize, DynamicImage>,
     image_scales: HashMap<usize, f32>,
@@ -41,8 +39,7 @@ impl PageCache {
     pub fn has_image_at_scale(&self, page_idx: usize, scale: f32) -> bool {
         self.image_scales
             .get(&page_idx)
-            .map(|s| (s - scale).abs() < 0.01)
-            .unwrap_or(false)
+            .is_some_and(|s| (s - scale).abs() < 0.01)
     }
 
     pub fn insert_image(&mut self, page_idx: usize, scale: f32, img: DynamicImage) {
@@ -53,14 +50,12 @@ impl PageCache {
         self.image_scales.insert(page_idx, scale);
     }
 
-    /// Get cached image dimensions for centering.
     pub fn image_dims(&self, page_idx: usize) -> Option<(u32, u32)> {
         self.images
             .get(&page_idx)
             .map(|img| (img.width(), img.height()))
     }
 
-    /// Get or create a display protocol for a page.
     pub fn get_protocol(
         &mut self,
         page_idx: usize,
@@ -70,7 +65,6 @@ impl PageCache {
         picker: &Picker,
         area: Rect,
     ) -> Option<&Protocol> {
-        // Invalidate protocols when zoom or pan changes
         let zoom_changed = (self.current_zoom - zoom).abs() > f32::EPSILON;
         let pan_changed = (self.current_pan.0 - pan.0).abs() > f32::EPSILON
             || (self.current_pan.1 - pan.1).abs() > f32::EPSILON;
@@ -86,7 +80,9 @@ impl PageCache {
             let base_img = if dark_mode {
                 if !self.inverted.contains_key(&page_idx) {
                     let normal = self.images.get(&page_idx)?;
-                    self.inverted.insert(page_idx, dark::invert(normal));
+                    let mut inv = normal.clone();
+                    inv.invert();
+                    self.inverted.insert(page_idx, inv);
                 }
                 self.inverted.get(&page_idx)?
             } else {
@@ -108,20 +104,18 @@ impl PageCache {
     }
 }
 
-/// Crop a portion of the image for zoom-in, offset by pan.
-/// pan_x/pan_y range: -1.0 (top/left) to 1.0 (bottom/right), 0.0 = center.
+/// Crop a viewport-sized portion of the image for zoom, offset by pan.
+/// `pan_x`/`pan_y` range: `-1.0` (top/left) to `1.0` (bottom/right), `0.0` = center.
 fn crop_with_pan(img: &DynamicImage, zoom: f32, pan_x: f32, pan_y: f32) -> DynamicImage {
-    let w = img.width();
-    let h = img.height();
-    let crop_w = (w as f32 / zoom).round() as u32;
-    let crop_h = (h as f32 / zoom).round() as u32;
+    let (w, h) = (img.width(), img.height());
+    let crop_w = (w as f32 / zoom).round().max(1.0) as u32;
+    let crop_h = (h as f32 / zoom).round().max(1.0) as u32;
 
     let max_x = w.saturating_sub(crop_w);
     let max_y = h.saturating_sub(crop_h);
 
-    // Map pan from [-1, 1] to [0, max_offset]
-    let x = ((0.5 + pan_x * 0.5) * max_x as f32).round() as u32;
-    let y = ((0.5 + pan_y * 0.5) * max_y as f32).round() as u32;
+    let x = (pan_x.mul_add(0.5, 0.5) * max_x as f32).round() as u32;
+    let y = (pan_y.mul_add(0.5, 0.5) * max_y as f32).round() as u32;
 
     img.crop_imm(x.min(max_x), y.min(max_y), crop_w.max(1), crop_h.max(1))
 }

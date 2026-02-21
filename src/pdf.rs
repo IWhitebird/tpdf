@@ -26,8 +26,8 @@ impl PdfDocument {
         let matrix = Matrix::new_scale(scale, scale);
         let pixmap = page.to_pixmap(&matrix, &Colorspace::device_rgb(), false, true)?;
 
-        let width = pixmap.width() as u32;
-        let height = pixmap.height() as u32;
+        let width = pixmap.width();
+        let height = pixmap.height();
         let samples = pixmap.samples();
         let stride = pixmap.stride() as usize;
         let n = pixmap.n() as usize;
@@ -50,5 +50,4 @@ impl PdfDocument {
 
         Ok(DynamicImage::ImageRgb8(img))
     }
-
 }

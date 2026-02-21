@@ -9,7 +9,6 @@ use ratatui_image::Image as RatatuiImage;
 
 use crate::app::{App, PageLayout};
 
-/// Horizontal alignment for page images in multi-page layouts.
 #[derive(Clone, Copy)]
 pub enum HAlign {
     Left,
@@ -26,12 +25,17 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         (ca, Some(sa))
     };
 
-    // Fill background so margins blend with page content
-    let bg = if app.dark_mode { Color::Black } else { Color::White };
+    let bg = if app.dark_mode {
+        Color::Rgb(0, 0, 0)
+    } else {
+        Color::Rgb(255, 255, 255)
+    };
     frame.render_widget(Block::default().style(Style::default().bg(bg)), content_area);
 
     match app.layout {
-        PageLayout::Single => draw_single_page(frame, content_area, app),
+        PageLayout::Single => {
+            render_page(frame, content_area, app, app.current_page, HAlign::Center);
+        }
         PageLayout::Dual => draw_multi_page(frame, content_area, app, 2),
         PageLayout::Triple => draw_multi_page(frame, content_area, app, 3),
     }
@@ -41,10 +45,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 }
 
-fn draw_single_page(frame: &mut Frame, area: Rect, app: &mut App) {
-    render_page(frame, area, app, app.current_page, HAlign::Center);
-}
-
 fn draw_multi_page(frame: &mut Frame, area: Rect, app: &mut App, count: usize) {
     let constraints: Vec<Constraint> = (0..count).map(|_| Constraint::Fill(1)).collect();
     let areas = Layout::horizontal(constraints).spacing(0).split(area);
@@ -52,9 +52,7 @@ fn draw_multi_page(frame: &mut Frame, area: Rect, app: &mut App, count: usize) {
     for i in 0..count {
         let idx = app.current_page + i;
         if idx < app.page_count {
-            let align = if count == 1 {
-                HAlign::Center
-            } else if i == 0 {
+            let align = if i == 0 {
                 HAlign::Right
             } else if i == count - 1 {
                 HAlign::Left
@@ -88,7 +86,6 @@ fn render_page(frame: &mut Frame, area: Rect, app: &mut App, page_idx: usize, ha
         let widget = RatatuiImage::new(protocol);
         frame.render_widget(widget, render_area);
     } else {
-        // Page still rendering / converting — show placeholder
         let text = format!("Loading page {}...", page_idx + 1);
         let loading = Paragraph::new(text).alignment(Alignment::Center);
         let y = area.y + area.height / 2;
@@ -98,7 +95,7 @@ fn render_page(frame: &mut Frame, area: Rect, app: &mut App, page_idx: usize, ha
 
 /// Calculate a sub-rect for the image with the given horizontal alignment.
 ///
-/// Uses the Picker's font_size and ceil() to match ratatui-image's internal
+/// Uses the Picker's `font_size` and `ceil()` to match ratatui-image's internal
 /// `round_pixel_size_to_cells`, so our area exactly matches the protocol footprint.
 pub fn aligned_image_area(
     img_w: u32,
@@ -112,19 +109,16 @@ pub fn aligned_image_area(
         return area;
     }
 
-    let (fw, fh) = (font_size.0 as f64, font_size.1 as f64);
+    let (fw, fh) = (f64::from(font_size.0), f64::from(font_size.1));
 
-    // Area in pixels (using the same font_size ratatui-image uses)
-    let area_px_w = area.width as f64 * fw;
-    let area_px_h = area.height as f64 * fh;
+    let area_px_w = f64::from(area.width) * fw;
+    let area_px_h = f64::from(area.height) * fh;
 
-    // Scale factor to fit the image within the area
-    let fit_scale = (area_px_w / img_w as f64).min(area_px_h / img_h as f64);
-    let display_scale = fit_scale * (zoom as f64).min(1.0);
+    let fit_scale = (area_px_w / f64::from(img_w)).min(area_px_h / f64::from(img_h));
+    let display_scale = fit_scale * f64::from(zoom).min(1.0);
 
-    // Cell footprint: ceil to match ratatui-image's round_pixel_size_to_cells
-    let used_w = ((img_w as f64 * display_scale) / fw).ceil() as u16;
-    let used_h = ((img_h as f64 * display_scale) / fh).ceil() as u16;
+    let used_w = ((f64::from(img_w) * display_scale) / fw).ceil() as u16;
+    let used_h = ((f64::from(img_h) * display_scale) / fh).ceil() as u16;
 
     let final_w = used_w.min(area.width).max(1);
     let final_h = used_h.min(area.height).max(1);
@@ -162,14 +156,14 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     let n = app.layout.pages_across();
     let end = (app.current_page + n).min(app.page_count);
     let pages = if end > start {
-        format!("{}-{}/{}", start, end, app.page_count)
+        format!("{start}-{end}/{}", app.page_count)
     } else {
-        format!("{}/{}", start, app.page_count)
+        format!("{start}/{}", app.page_count)
     };
 
-    let zoom = format!("{}%", (app.zoom * 100.0).round() as u32);
+    let zoom_pct = format!("{}%", (app.zoom * 100.0).round() as u32);
 
-    let mut info_parts = vec![pages, zoom];
+    let mut info_parts = vec![pages, zoom_pct];
     match app.layout {
         PageLayout::Dual => info_parts.push("2UP".into()),
         PageLayout::Triple => info_parts.push("3UP".into()),
@@ -184,7 +178,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
 
     let left_parts = vec![
         Span::styled(" tpdf", bold),
-        Span::raw(format!(" | {}", info)),
+        Span::raw(format!(" | {info}")),
     ];
     let left_len = 5 + 3 + info.len();
     let gap = (area.width as usize).saturating_sub(left_len + keys.len());
