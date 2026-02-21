@@ -26,9 +26,7 @@ fn platform_name() -> Result<String, Box<dyn std::error::Error>> {
 
 fn fetch_latest_tag() -> Result<String, Box<dyn std::error::Error>> {
     let url = format!("https://api.github.com/repos/{REPO}/releases/latest");
-    let output = Command::new("curl")
-        .args(["-fsSL", &url])
-        .output()?;
+    let output = Command::new("curl").args(["-fsSL", &url]).output()?;
 
     if !output.status.success() {
         return Err("Failed to fetch release info from GitHub".into());

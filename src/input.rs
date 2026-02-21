@@ -6,9 +6,7 @@ pub fn key_to_message(key: KeyEvent) -> Option<Message> {
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc => Some(Message::Quit),
 
-        KeyCode::Right | KeyCode::Char('l' | ' ') | KeyCode::PageDown => {
-            Some(Message::NextPage)
-        }
+        KeyCode::Right | KeyCode::Char('l' | ' ') | KeyCode::PageDown => Some(Message::NextPage),
         KeyCode::Left | KeyCode::Char('h') | KeyCode::PageUp => Some(Message::PrevPage),
 
         KeyCode::Char('g') | KeyCode::Home => Some(Message::FirstPage),

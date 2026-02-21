@@ -54,7 +54,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return update::self_update();
     }
 
-    let path = cli.path.ok_or("usage: tpdf <file.pdf>\n       tpdf update")?;
+    let path = cli
+        .path
+        .ok_or("usage: tpdf <file.pdf>\n       tpdf update")?;
 
     let config = AppConfig {
         dark_mode: cli.night,

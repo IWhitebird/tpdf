@@ -30,7 +30,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     } else {
         Color::Rgb(255, 255, 255)
     };
-    frame.render_widget(Block::default().style(Style::default().bg(bg)), content_area);
+    frame.render_widget(
+        Block::default().style(Style::default().bg(bg)),
+        content_area,
+    );
 
     match app.layout {
         PageLayout::Single => {
@@ -176,10 +179,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     let info = info_parts.join(" | ");
     let keys = "h/l:page  jk:pan  +/-:zoom  d:layout  f:full  p:goto  n:night  q:quit ";
 
-    let left_parts = vec![
-        Span::styled(" tpdf", bold),
-        Span::raw(format!(" | {info}")),
-    ];
+    let left_parts = vec![Span::styled(" tpdf", bold), Span::raw(format!(" | {info}"))];
     let left_len = 5 + 3 + info.len();
     let gap = (area.width as usize).saturating_sub(left_len + keys.len());
 
