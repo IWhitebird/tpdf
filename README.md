@@ -55,7 +55,23 @@ sudo cp target/release/tpdf /usr/local/bin/
 ## Usage
 
 ```
-tpdf <path-to-pdf>
+tpdf [OPTIONS] [PATH] [COMMAND]
+```
+
+```
+Arguments:
+  [PATH]  Path to PDF file
+
+Commands:
+  update  Update tpdf to the latest version
+
+Options:
+  -n, --night           Start in night mode
+  -f, --fullscreen      Start in fullscreen
+  -p, --page <N>        Start at page number
+  -d, --layout <1|2|3>  Layout: 1 (single), 2 (dual), 3 (triple)
+  -h, --help            Print help
+  -V, --version         Print version
 ```
 
 ## Keybindings
