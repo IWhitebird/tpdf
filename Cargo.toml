@@ -9,7 +9,7 @@ categories = ["command-line-utilities"]
 
 [dependencies]
 ratatui = { version = "0.30", features = ["crossterm"] }
-ratatui-image = { version = "10.0", features = ["crossterm"] }
+ratatui-image = { version = "10.0", default-features = false, features = ["crossterm"] }
 image = "0.25"
 crossterm = "0.29"
 clap = { version = "4", features = ["derive"] }
