@@ -1,0 +1,17 @@
+[package]
+name = "tpdf"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ratatui = { version = "0.30", features = ["crossterm"] }
+ratatui-image = { version = "10.0", features = ["crossterm"] }
+image = "0.25"
+crossterm = "0.29"
+clap = { version = "4", features = ["derive"] }
+mupdf = "0.6"
+mimalloc = "0.1"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
