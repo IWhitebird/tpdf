@@ -33,7 +33,7 @@ tpdf requires a terminal with a graphics protocol. It auto-detects the best avai
 ## Installation
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/IWhitebird/tpdf/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/IWhitebird/tpdf/master/install.sh | bash
 ```
 
 ### Other methods

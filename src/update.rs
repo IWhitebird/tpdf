@@ -87,11 +87,27 @@ pub fn self_update() -> Result<(), Box<dyn std::error::Error>> {
 
     let new_binary = tmp_dir.join("tpdf");
 
-    // Replace the current binary
-    // First try a direct rename (same filesystem), fall back to copy
-    if fs::rename(&new_binary, &current_exe).is_err() {
-        fs::copy(&new_binary, &current_exe)?;
+    // Rename-then-replace strategy (same as Bun/Claude Code):
+    // Linux won't let you overwrite a running binary (ETXTBSY), but
+    // renaming it is allowed. So we rename the old binary out of the way,
+    // place the new one at the original path, then delete the old one.
+    let backup = current_exe.with_extension("old");
+    fs::rename(&current_exe, &backup)?;
+
+    if let Err(e) = fs::copy(&new_binary, &current_exe) {
+        // Restore the old binary if the copy fails
+        let _ = fs::rename(&backup, &current_exe);
+        return Err(format!("Failed to install new binary: {e}").into());
     }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&current_exe, fs::Permissions::from_mode(0o755))?;
+    }
+
+    let _ = fs::remove_file(&backup);
+    let _ = fs::remove_dir_all(&tmp_dir);
 
     println!("Updated tpdf to v{latest}!");
     Ok(())
