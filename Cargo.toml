@@ -16,6 +16,9 @@ clap = { version = "4", features = ["derive"] }
 mupdf = "0.6"
 mimalloc = "0.1"
 
+[dev-dependencies]
+cargo-husky = { version = "1", default-features = false, features = ["prepush-hook", "run-cargo-fmt", "run-cargo-clippy"] }
+
 [profile.release]
 lto = "fat"
 codegen-units = 1
