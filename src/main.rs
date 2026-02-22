@@ -54,15 +54,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return update::self_update();
     }
 
-    let path = match cli.path {
-        Some(p) => p,
-        None => {
-            eprintln!("tpdf - Terminal PDF viewer\n");
-            eprintln!("Usage: tpdf <file.pdf>");
-            eprintln!("       tpdf update\n");
-            eprintln!("Run 'tpdf --help' for more options.");
-            std::process::exit(1);
-        }
+    let Some(path) = cli.path else {
+        eprintln!("tpdf - Terminal PDF viewer\n");
+        eprintln!("Usage: tpdf <file.pdf>");
+        eprintln!("       tpdf update\n");
+        eprintln!("Run 'tpdf --help' for more options.");
+        std::process::exit(1);
     };
 
     let config = AppConfig {
