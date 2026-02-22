@@ -207,36 +207,53 @@ impl App {
                 dirty = false;
             }
 
-            let timeout = if self.has_pending_visible() {
+            let has_pending = self.has_pending_visible();
+            let needs_prewarm =
+                !has_pending && self.has_nearby_unwarmed_protocol();
+            let timeout = if has_pending {
                 Duration::from_millis(16)
+            } else if needs_prewarm {
+                Duration::from_millis(1)
             } else {
                 Duration::from_secs(60)
             };
 
             if event::poll(timeout)? {
-                match event::read()? {
-                    Event::Key(key) if key.kind == KeyEventKind::Press => {
-                        let msg = if self.goto_mode {
-                            input::key_to_goto_message(key)
-                        } else {
-                            input::key_to_message(key)
-                        };
-                        if let Some(msg) = msg {
-                            self.update(msg);
-                            self.request_visible_pages();
+                // Drain ALL pending events before redrawing so held-key
+                // repeats don't pile up behind slow frames.
+                loop {
+                    match event::read()? {
+                        Event::Key(key) if key.kind == KeyEventKind::Press => {
+                            let msg = if self.goto_mode {
+                                input::key_to_goto_message(key)
+                            } else {
+                                input::key_to_message(key)
+                            };
+                            if let Some(msg) = msg {
+                                self.update(msg);
+                                dirty = true;
+                            }
+                        }
+                        Event::Resize(cols, rows) => {
+                            self.term_cols = cols;
+                            self.term_rows = rows;
+                            self.cache.clear();
+                            self.pending.clear();
                             dirty = true;
                         }
+                        _ => {}
                     }
-                    Event::Resize(cols, rows) => {
-                        self.term_cols = cols;
-                        self.term_rows = rows;
-                        self.cache.clear();
-                        self.pending.clear();
-                        self.request_visible_pages();
-                        dirty = true;
+                    // Keep draining while more events are buffered
+                    if !event::poll(Duration::ZERO)? {
+                        break;
                     }
-                    _ => {}
                 }
+                if dirty {
+                    self.request_visible_pages();
+                    self.cache.evict_distant(self.current_page, 15);
+                }
+            } else if needs_prewarm {
+                self.prewarm_one_nearby_protocol();
             }
         }
 
@@ -267,31 +284,32 @@ impl App {
         if received {
             let n = self.layout.pages_across();
             let per_page_width = self.term_cols / n as u16;
+            let usable = self.usable_rows();
 
-            for i in 0..n {
-                let idx = self.current_page + i;
-                if idx < self.page_count {
-                    let page_area = Rect::new(0, 0, per_page_width, self.usable_rows());
-                    let Some((w, h)) = self.cache.image_dims(idx) else {
-                        continue;
-                    };
-                    let render_area = view::aligned_image_area(
-                        w,
-                        h,
-                        page_area,
-                        self.picker.font_size(),
-                        self.zoom,
-                        view::HAlign::Center,
-                    );
-                    self.cache.get_protocol(
-                        idx,
-                        self.dark_mode,
-                        self.zoom,
-                        (self.pan_x, self.pan_y),
-                        &self.picker,
-                        render_area,
-                    );
-                }
+            // Pre-warm protocols for visible pages + a few ahead for smooth navigation
+            let prewarm_start = self.current_page;
+            let prewarm_end = (self.current_page + n + 3).min(self.page_count);
+            for idx in prewarm_start..prewarm_end {
+                let Some((w, h)) = self.cache.image_dims(idx) else {
+                    continue;
+                };
+                let page_area = Rect::new(0, 0, per_page_width, usable);
+                let render_area = view::aligned_image_area(
+                    w,
+                    h,
+                    page_area,
+                    self.picker.font_size(),
+                    self.zoom,
+                    view::HAlign::Center,
+                );
+                self.cache.get_protocol(
+                    idx,
+                    self.dark_mode,
+                    self.zoom,
+                    (self.pan_x, self.pan_y),
+                    &self.picker,
+                    render_area,
+                );
             }
         }
         received
@@ -341,6 +359,55 @@ impl App {
         }
     }
 
+    /// Check if any nearby page has a cached image but no protocol yet.
+    fn has_nearby_unwarmed_protocol(&self) -> bool {
+        let n = self.layout.pages_across();
+        let start = self.current_page.saturating_sub(5);
+        let end = (self.current_page + n + 5).min(self.page_count);
+        (start..end).any(|idx| {
+            self.cache.image_dims(idx).is_some()
+                && !self.cache.has_protocol(idx, self.dark_mode)
+        })
+    }
+
+    /// Generate one protocol for a nearby page during idle time.
+    fn prewarm_one_nearby_protocol(&mut self) {
+        let n = self.layout.pages_across();
+        let per_page_width = self.term_cols / n as u16;
+        let usable = self.usable_rows();
+
+        // Prioritise pages ahead, then behind
+        let start = self.current_page;
+        let end = (self.current_page + n + 5).min(self.page_count);
+        let behind_start = self.current_page.saturating_sub(5);
+
+        for idx in (start..end).chain(behind_start..self.current_page) {
+            if self.cache.image_dims(idx).is_some()
+                && !self.cache.has_protocol(idx, self.dark_mode)
+            {
+                let (w, h) = self.cache.image_dims(idx).unwrap();
+                let page_area = Rect::new(0, 0, per_page_width, usable);
+                let render_area = view::aligned_image_area(
+                    w,
+                    h,
+                    page_area,
+                    self.picker.font_size(),
+                    self.zoom,
+                    view::HAlign::Center,
+                );
+                self.cache.get_protocol(
+                    idx,
+                    self.dark_mode,
+                    self.zoom,
+                    (self.pan_x, self.pan_y),
+                    &self.picker,
+                    render_area,
+                );
+                return;
+            }
+        }
+    }
+
     fn request_page(&mut self, idx: usize, scale: f32) {
         if !self.cache.has_image_at_scale(idx, scale)
             && !self.pending.contains(&idx)
@@ -360,13 +427,11 @@ impl App {
             Message::Quit => self.should_quit = true,
 
             Message::NextPage => {
-                let step = self.layout.pages_across();
                 let max = self.page_count.saturating_sub(1);
-                self.current_page = (self.current_page + step).min(max);
+                self.current_page = (self.current_page + 1).min(max);
             }
             Message::PrevPage => {
-                let step = self.layout.pages_across();
-                self.current_page = self.current_page.saturating_sub(step);
+                self.current_page = self.current_page.saturating_sub(1);
             }
             Message::FirstPage => {
                 self.current_page = 0;

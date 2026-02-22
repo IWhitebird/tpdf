@@ -54,9 +54,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return update::self_update();
     }
 
-    let path = cli
-        .path
-        .ok_or("usage: tpdf <file.pdf>\n       tpdf update")?;
+    let path = match cli.path {
+        Some(p) => p,
+        None => {
+            eprintln!("tpdf - Terminal PDF viewer\n");
+            eprintln!("Usage: tpdf <file.pdf>");
+            eprintln!("       tpdf update\n");
+            eprintln!("Run 'tpdf --help' for more options.");
+            std::process::exit(1);
+        }
+    };
 
     let config = AppConfig {
         dark_mode: cli.night,

@@ -7,7 +7,12 @@
      |_|
 ```
 
+[![CI](https://github.com/IWhitebird/tpdf/actions/workflows/ci.yml/badge.svg)](https://github.com/IWhitebird/tpdf/actions/workflows/ci.yml)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
+
 A fast terminal PDF viewer.
+
+![tpdf demo](assets/demo.gif)
 
 ## Supported Terminals
 
@@ -45,9 +50,11 @@ tar xzf tpdf-*.tar.gz
 sudo mv tpdf /usr/local/bin/
 ```
 
-**Build from source** (requires Rust toolchain):
+**Build from source** (requires Rust toolchain + `libfontconfig1-dev`):
 
 ```sh
+git clone https://github.com/IWhitebird/tpdf.git
+cd tpdf
 cargo build --release
 sudo cp target/release/tpdf /usr/local/bin/
 ```
@@ -94,7 +101,7 @@ Options:
 
 More features coming soon!
 
-- Text mode for the terminals that does'nt support kitty graphics rendering 
+- Text mode for terminals that don't support graphics protocols
 - Text search within PDFs
 - Table of contents / outline navigation
 - Bookmark support

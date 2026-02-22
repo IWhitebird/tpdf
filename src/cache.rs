@@ -36,6 +36,20 @@ impl PageCache {
         self.protocols.clear();
     }
 
+    pub fn has_protocol(&self, page_idx: usize, dark_mode: bool) -> bool {
+        self.protocols.contains_key(&(page_idx, dark_mode))
+    }
+
+    /// Drop cached data for pages far from the current view.
+    pub fn evict_distant(&mut self, current_page: usize, keep_range: usize) {
+        let min = current_page.saturating_sub(keep_range);
+        let max = current_page + keep_range;
+        self.images.retain(|&k, _| k >= min && k <= max);
+        self.image_scales.retain(|&k, _| k >= min && k <= max);
+        self.inverted.retain(|&k, _| k >= min && k <= max);
+        self.protocols.retain(|&(k, _), _| k >= min && k <= max);
+    }
+
     pub fn has_image_at_scale(&self, page_idx: usize, scale: f32) -> bool {
         self.image_scales
             .get(&page_idx)
@@ -66,8 +80,9 @@ impl PageCache {
         area: Rect,
     ) -> Option<&Protocol> {
         let zoom_changed = (self.current_zoom - zoom).abs() > f32::EPSILON;
-        let pan_changed = (self.current_pan.0 - pan.0).abs() > f32::EPSILON
-            || (self.current_pan.1 - pan.1).abs() > f32::EPSILON;
+        let pan_changed = zoom > 1.0
+            && ((self.current_pan.0 - pan.0).abs() > f32::EPSILON
+                || (self.current_pan.1 - pan.1).abs() > f32::EPSILON);
 
         if zoom_changed || pan_changed {
             self.protocols.clear();

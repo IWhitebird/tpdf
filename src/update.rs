@@ -52,7 +52,7 @@ pub fn self_update() -> Result<(), Box<dyn std::error::Error>> {
     let latest = tag.strip_prefix('v').unwrap_or(&tag);
 
     if latest == CURRENT_VERSION {
-        println!("Already on the latest version.");
+        println!("Already on the latest version (v{CURRENT_VERSION}).");
         return Ok(());
     }
 
