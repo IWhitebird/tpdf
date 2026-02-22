@@ -22,6 +22,7 @@ pub struct AppConfig {
     pub fullscreen: bool,
     pub start_page: usize,
     pub layout: PageLayout,
+    pub text_mode: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -65,6 +66,7 @@ pub enum Message {
     CycleLayout,
     ToggleDarkMode,
     ToggleFullscreen,
+    ToggleTextMode,
     EnterGoto,
     GotoInput(char),
     GotoBackspace,
@@ -86,7 +88,7 @@ struct RenderResult {
 #[allow(clippy::struct_excessive_bools)]
 pub struct App {
     pub(crate) cache: PageCache,
-    pub(crate) picker: Picker,
+    pub(crate) picker: Option<Picker>,
     pub(crate) current_page: usize,
     pub(crate) page_count: usize,
     pub(crate) zoom: f32,
@@ -97,11 +99,15 @@ pub struct App {
     pub(crate) fullscreen: bool,
     pub(crate) goto_mode: bool,
     pub(crate) goto_input: String,
+    pub(crate) text_mode: bool,
+    pub(crate) text_scroll: usize,
     term_cols: u16,
     term_rows: u16,
     page_bounds: (f32, f32),
-    render_tx: Sender<RenderRequest>,
-    render_rx: Receiver<RenderResult>,
+    pdf_path: String,
+    text_pdf: Option<PdfDocument>,
+    render_tx: Option<Sender<RenderRequest>>,
+    render_rx: Option<Receiver<RenderResult>>,
     pending: HashSet<usize>,
     should_quit: bool,
 }
@@ -112,7 +118,7 @@ const ZOOM_STEP: f32 = 0.10;
 impl App {
     pub fn new(
         path: &str,
-        picker: Picker,
+        picker: Option<Picker>,
         term_cols: u16,
         term_rows: u16,
         config: &AppConfig,
@@ -125,48 +131,54 @@ impl App {
         let page_bounds = pdf.page_bounds(0).unwrap_or((612.0, 792.0));
         drop(pdf);
 
-        let (req_tx, req_rx) = mpsc::channel::<RenderRequest>();
-        let (res_tx, res_rx) = mpsc::channel::<RenderResult>();
-        let shared_rx = Arc::new(Mutex::new(req_rx));
+        let (render_tx, render_rx) = if picker.is_some() {
+            let (req_tx, req_rx) = mpsc::channel::<RenderRequest>();
+            let (res_tx, res_rx) = mpsc::channel::<RenderResult>();
+            let shared_rx = Arc::new(Mutex::new(req_rx));
 
-        let num_threads = std::thread::available_parallelism()
-            .map(|n| n.get().min(4))
-            .unwrap_or(2);
+            let num_threads = std::thread::available_parallelism()
+                .map(|n| n.get().min(4))
+                .unwrap_or(2);
 
-        for _ in 0..num_threads {
-            let rx = Arc::clone(&shared_rx);
-            let tx = res_tx.clone();
-            let p = path.to_string();
-            std::thread::spawn(move || {
-                let pdf = PdfDocument::open(&p).expect("render worker: failed to open PDF");
-                loop {
-                    let req = {
-                        let guard = rx.lock().unwrap();
-                        guard.recv()
-                    };
-                    match req {
-                        Ok(r) => {
-                            if let Ok(img) = pdf.render_page(r.idx, r.scale) {
-                                if tx
-                                    .send(RenderResult {
-                                        idx: r.idx,
-                                        scale: r.scale,
-                                        img,
-                                    })
-                                    .is_err()
-                                {
-                                    break;
+            for _ in 0..num_threads {
+                let rx = Arc::clone(&shared_rx);
+                let tx = res_tx.clone();
+                let p = path.to_string();
+                std::thread::spawn(move || {
+                    let pdf = PdfDocument::open(&p).expect("render worker: failed to open PDF");
+                    loop {
+                        let req = {
+                            let guard = rx.lock().unwrap();
+                            guard.recv()
+                        };
+                        match req {
+                            Ok(r) => {
+                                if let Ok(img) = pdf.render_page(r.idx, r.scale) {
+                                    if tx
+                                        .send(RenderResult {
+                                            idx: r.idx,
+                                            scale: r.scale,
+                                            img,
+                                        })
+                                        .is_err()
+                                    {
+                                        break;
+                                    }
                                 }
                             }
+                            Err(_) => break,
                         }
-                        Err(_) => break,
                     }
-                }
-            });
-        }
-        drop(res_tx);
+                });
+            }
+            drop(res_tx);
+            (Some(req_tx), Some(res_rx))
+        } else {
+            (None, None)
+        };
 
         let start_page = config.start_page.min(page_count.saturating_sub(1));
+        let text_mode = config.text_mode || picker.is_none();
 
         Ok(Self {
             cache: PageCache::new(),
@@ -183,20 +195,26 @@ impl App {
             term_rows,
             goto_mode: false,
             goto_input: String::new(),
+            text_mode,
+            text_scroll: 0,
             page_bounds,
-            render_tx: req_tx,
-            render_rx: res_rx,
+            pdf_path: path.to_string(),
+            text_pdf: None,
+            render_tx,
+            render_rx,
             pending: HashSet::new(),
             should_quit: false,
         })
     }
 
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
-        self.request_visible_pages();
+        if !self.text_mode {
+            self.request_visible_pages();
+        }
         let mut dirty = true;
 
         while !self.should_quit {
-            if self.process_render_results() {
+            if !self.text_mode && self.process_render_results() {
                 dirty = true;
             }
 
@@ -207,15 +225,18 @@ impl App {
                 dirty = false;
             }
 
-            let has_pending = self.has_pending_visible();
-            let needs_prewarm =
-                !has_pending && self.has_nearby_unwarmed_protocol();
-            let timeout = if has_pending {
-                Duration::from_millis(16)
-            } else if needs_prewarm {
-                Duration::from_millis(1)
-            } else {
+            let timeout = if self.text_mode {
                 Duration::from_secs(60)
+            } else {
+                let has_pending = self.has_pending_visible();
+                let needs_prewarm = !has_pending && self.has_nearby_unwarmed_protocol();
+                if has_pending {
+                    Duration::from_millis(16)
+                } else if needs_prewarm {
+                    Duration::from_millis(1)
+                } else {
+                    Duration::from_secs(60)
+                }
             };
 
             if event::poll(timeout)? {
@@ -248,11 +269,11 @@ impl App {
                         break;
                     }
                 }
-                if dirty {
+                if dirty && !self.text_mode {
                     self.request_visible_pages();
                     self.cache.evict_distant(self.current_page, 15);
                 }
-            } else if needs_prewarm {
+            } else if !self.text_mode && self.has_nearby_unwarmed_protocol() {
                 self.prewarm_one_nearby_protocol();
             }
         }
@@ -269,11 +290,34 @@ impl App {
         }
     }
 
+    /// Ensure extracted text for `page_idx` is cached.
+    pub(crate) fn ensure_page_text(&mut self, page_idx: usize) {
+        if self.cache.has_text(page_idx) {
+            return;
+        }
+        if self.text_pdf.is_none() {
+            self.text_pdf = PdfDocument::open(&self.pdf_path).ok();
+        }
+        let text = self
+            .text_pdf
+            .as_ref()
+            .and_then(|pdf| pdf.extract_text(page_idx).ok())
+            .unwrap_or_default();
+        self.cache.insert_text(page_idx, text);
+    }
+
     fn process_render_results(&mut self) -> bool {
+        let Some(ref render_rx) = self.render_rx else {
+            return false;
+        };
+        let Some(ref picker) = self.picker else {
+            return false;
+        };
+
         let current_scale = self.render_scale();
         let mut received = false;
 
-        while let Ok(r) = self.render_rx.try_recv() {
+        while let Ok(r) = render_rx.try_recv() {
             self.pending.remove(&r.idx);
             if (r.scale - current_scale).abs() < 0.01 {
                 self.cache.insert_image(r.idx, r.scale, r.img);
@@ -298,7 +342,7 @@ impl App {
                     w,
                     h,
                     page_area,
-                    self.picker.font_size(),
+                    picker.font_size(),
                     self.zoom,
                     view::HAlign::Center,
                 );
@@ -307,7 +351,7 @@ impl App {
                     self.dark_mode,
                     self.zoom,
                     (self.pan_x, self.pan_y),
-                    &self.picker,
+                    picker,
                     render_area,
                 );
             }
@@ -316,6 +360,9 @@ impl App {
     }
 
     fn has_pending_visible(&self) -> bool {
+        if self.picker.is_none() {
+            return false;
+        }
         let scale = self.render_scale();
         let n = self.layout.pages_across();
         (0..n).any(|i| {
@@ -325,7 +372,10 @@ impl App {
     }
 
     pub fn render_scale(&self) -> f32 {
-        let (fw, fh) = self.picker.font_size();
+        let Some(ref picker) = self.picker else {
+            return 1.0;
+        };
+        let (fw, fh) = picker.font_size();
         let pages_across = self.layout.pages_across() as f64;
         let area_px_w = (f64::from(self.term_cols) / pages_across) * f64::from(fw);
         let area_px_h = f64::from(self.usable_rows()) * f64::from(fh);
@@ -337,6 +387,9 @@ impl App {
     }
 
     fn request_visible_pages(&mut self) {
+        if self.render_tx.is_none() {
+            return;
+        }
         let scale = self.render_scale();
         let n = self.layout.pages_across();
 
@@ -361,17 +414,22 @@ impl App {
 
     /// Check if any nearby page has a cached image but no protocol yet.
     fn has_nearby_unwarmed_protocol(&self) -> bool {
+        if self.picker.is_none() {
+            return false;
+        }
         let n = self.layout.pages_across();
         let start = self.current_page.saturating_sub(5);
         let end = (self.current_page + n + 5).min(self.page_count);
         (start..end).any(|idx| {
-            self.cache.image_dims(idx).is_some()
-                && !self.cache.has_protocol(idx, self.dark_mode)
+            self.cache.image_dims(idx).is_some() && !self.cache.has_protocol(idx, self.dark_mode)
         })
     }
 
     /// Generate one protocol for a nearby page during idle time.
     fn prewarm_one_nearby_protocol(&mut self) {
+        let Some(ref picker) = self.picker else {
+            return;
+        };
         let n = self.layout.pages_across();
         let per_page_width = self.term_cols / n as u16;
         let usable = self.usable_rows();
@@ -382,8 +440,7 @@ impl App {
         let behind_start = self.current_page.saturating_sub(5);
 
         for idx in (start..end).chain(behind_start..self.current_page) {
-            if self.cache.image_dims(idx).is_some()
-                && !self.cache.has_protocol(idx, self.dark_mode)
+            if self.cache.image_dims(idx).is_some() && !self.cache.has_protocol(idx, self.dark_mode)
             {
                 let (w, h) = self.cache.image_dims(idx).unwrap();
                 let page_area = Rect::new(0, 0, per_page_width, usable);
@@ -391,7 +448,7 @@ impl App {
                     w,
                     h,
                     page_area,
-                    self.picker.font_size(),
+                    picker.font_size(),
                     self.zoom,
                     view::HAlign::Center,
                 );
@@ -400,7 +457,7 @@ impl App {
                     self.dark_mode,
                     self.zoom,
                     (self.pan_x, self.pan_y),
-                    &self.picker,
+                    picker,
                     render_area,
                 );
                 return;
@@ -409,9 +466,12 @@ impl App {
     }
 
     fn request_page(&mut self, idx: usize, scale: f32) {
+        let Some(ref render_tx) = self.render_tx else {
+            return;
+        };
         if !self.cache.has_image_at_scale(idx, scale)
             && !self.pending.contains(&idx)
-            && self.render_tx.send(RenderRequest { idx, scale }).is_ok()
+            && render_tx.send(RenderRequest { idx, scale }).is_ok()
         {
             self.pending.insert(idx);
         }
@@ -422,6 +482,7 @@ impl App {
         self.pan_y = 0.0;
     }
 
+    #[allow(clippy::too_many_lines)]
     fn update(&mut self, msg: Message) {
         match msg {
             Message::Quit => self.should_quit = true,
@@ -429,15 +490,19 @@ impl App {
             Message::NextPage => {
                 let max = self.page_count.saturating_sub(1);
                 self.current_page = (self.current_page + 1).min(max);
+                self.text_scroll = 0;
             }
             Message::PrevPage => {
                 self.current_page = self.current_page.saturating_sub(1);
+                self.text_scroll = 0;
             }
             Message::FirstPage => {
                 self.current_page = 0;
+                self.text_scroll = 0;
             }
             Message::LastPage => {
                 self.current_page = self.page_count.saturating_sub(1);
+                self.text_scroll = 0;
             }
 
             Message::ZoomIn => {
@@ -457,12 +522,16 @@ impl App {
             }
 
             Message::ScrollUp => {
-                if self.zoom > 1.0 {
+                if self.text_mode {
+                    self.text_scroll = self.text_scroll.saturating_sub(3);
+                } else if self.zoom > 1.0 {
                     self.pan_y = (self.pan_y - PAN_STEP).max(-1.0);
                 }
             }
             Message::ScrollDown => {
-                if self.zoom > 1.0 {
+                if self.text_mode {
+                    self.text_scroll = self.text_scroll.saturating_add(3);
+                } else if self.zoom > 1.0 {
                     self.pan_y = (self.pan_y + PAN_STEP).min(1.0);
                 }
             }
@@ -487,6 +556,17 @@ impl App {
                 self.cache.clear();
                 self.pending.clear();
             }
+            Message::ToggleTextMode => {
+                if self.picker.is_some() {
+                    self.text_mode = !self.text_mode;
+                    self.text_scroll = 0;
+                    if !self.text_mode {
+                        self.cache.clear();
+                        self.pending.clear();
+                        self.request_visible_pages();
+                    }
+                }
+            }
 
             Message::EnterGoto => {
                 self.goto_mode = true;
@@ -508,6 +588,7 @@ impl App {
                 }
                 self.goto_mode = false;
                 self.goto_input.clear();
+                self.text_scroll = 0;
             }
             Message::GotoCancel => {
                 self.goto_mode = false;

@@ -25,6 +25,7 @@ pub fn key_to_message(key: KeyEvent) -> Option<Message> {
         KeyCode::Char('n') => Some(Message::ToggleDarkMode),
         KeyCode::Char('f') => Some(Message::ToggleFullscreen),
         KeyCode::Char('p') => Some(Message::EnterGoto),
+        KeyCode::Char('t') => Some(Message::ToggleTextMode),
 
         _ => None,
     }

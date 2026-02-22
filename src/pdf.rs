@@ -50,4 +50,10 @@ impl PdfDocument {
 
         Ok(DynamicImage::ImageRgb8(img))
     }
+
+    pub fn extract_text(&self, page_idx: usize) -> Result<String, mupdf::Error> {
+        let page = self.doc.load_page(page_idx as i32)?;
+        let text_page = page.to_text_page(mupdf::TextPageFlags::empty())?;
+        text_page.to_text()
+    }
 }

@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Paragraph},
+    widgets::{Block, Paragraph, Wrap},
     Frame,
 };
 use ratatui_image::Image as RatatuiImage;
@@ -35,17 +35,56 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         content_area,
     );
 
-    match app.layout {
-        PageLayout::Single => {
-            render_page(frame, content_area, app, app.current_page, HAlign::Center);
+    if app.text_mode {
+        render_text_page(frame, content_area, app);
+    } else {
+        match app.layout {
+            PageLayout::Single => {
+                render_page(frame, content_area, app, app.current_page, HAlign::Center);
+            }
+            PageLayout::Dual => draw_multi_page(frame, content_area, app, 2),
+            PageLayout::Triple => draw_multi_page(frame, content_area, app, 3),
         }
-        PageLayout::Dual => draw_multi_page(frame, content_area, app, 2),
-        PageLayout::Triple => draw_multi_page(frame, content_area, app, 3),
     }
 
     if let Some(sa) = status_area {
         draw_status_bar(frame, sa, app);
     }
+}
+
+fn render_text_page(frame: &mut Frame, area: Rect, app: &mut App) {
+    let page_idx = app.current_page;
+    if page_idx >= app.page_count {
+        return;
+    }
+
+    app.ensure_page_text(page_idx);
+
+    let text = app.cache.get_text(page_idx).unwrap_or("");
+    let dark_mode = app.dark_mode;
+    let scroll = app.text_scroll;
+
+    let (fg, bg) = if dark_mode {
+        (Color::Rgb(220, 220, 220), Color::Rgb(0, 0, 0))
+    } else {
+        (Color::Rgb(30, 30, 30), Color::Rgb(255, 255, 255))
+    };
+
+    if text.is_empty() {
+        let msg = Paragraph::new("(No extractable text on this page)")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::DarkGray).bg(bg));
+        let y = area.y + area.height / 2;
+        frame.render_widget(msg, Rect::new(area.x, y, area.width, 1));
+        return;
+    }
+
+    let paragraph = Paragraph::new(text)
+        .style(Style::default().fg(fg).bg(bg))
+        .wrap(Wrap { trim: false })
+        .scroll((scroll as u16, 0));
+
+    frame.render_widget(paragraph, area);
 }
 
 fn draw_multi_page(frame: &mut Frame, area: Rect, app: &mut App, count: usize) {
@@ -72,8 +111,12 @@ fn render_page(frame: &mut Frame, area: Rect, app: &mut App, page_idx: usize, ha
         return;
     }
 
+    let Some(ref picker) = app.picker else {
+        return;
+    };
+
     let render_area = if let Some((w, h)) = app.cache.image_dims(page_idx) {
-        aligned_image_area(w, h, area, app.picker.font_size(), app.zoom, halign)
+        aligned_image_area(w, h, area, picker.font_size(), app.zoom, halign)
     } else {
         area
     };
@@ -83,7 +126,7 @@ fn render_page(frame: &mut Frame, area: Rect, app: &mut App, page_idx: usize, ha
         app.dark_mode,
         app.zoom,
         (app.pan_x, app.pan_y),
-        &app.picker,
+        picker,
         render_area,
     ) {
         let widget = RatatuiImage::new(protocol);
@@ -164,9 +207,11 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         format!("{start}/{}", app.page_count)
     };
 
-    let zoom_pct = format!("{}%", (app.zoom * 100.0).round() as u32);
-
-    let mut info_parts = vec![pages, zoom_pct];
+    let mut info_parts = vec![pages];
+    if !app.text_mode {
+        let zoom_pct = format!("{}%", (app.zoom * 100.0).round() as u32);
+        info_parts.push(zoom_pct);
+    }
     match app.layout {
         PageLayout::Dual => info_parts.push("2UP".into()),
         PageLayout::Triple => info_parts.push("3UP".into()),
@@ -175,9 +220,20 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     if app.dark_mode {
         info_parts.push("NIGHT".into());
     }
+    if app.text_mode {
+        info_parts.push("TEXT".into());
+    }
 
     let info = info_parts.join(" | ");
-    let keys = "h/l:page  jk:pan  +/-:zoom  d:layout  f:full  p:goto  n:night  q:quit ";
+    let keys = if app.text_mode {
+        if app.picker.is_some() {
+            "h/l:page  jk:scroll  t:image  f:full  p:goto  n:night  q:quit "
+        } else {
+            "h/l:page  jk:scroll  f:full  p:goto  n:night  q:quit "
+        }
+    } else {
+        "h/l:page  jk:pan  +/-:zoom  d:layout  f:full  p:goto  n:night  t:text  q:quit "
+    };
 
     let left_parts = vec![Span::styled(" tpdf", bold), Span::raw(format!(" | {info}"))];
     let left_len = 5 + 3 + info.len();

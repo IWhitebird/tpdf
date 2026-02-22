@@ -11,6 +11,7 @@ pub struct PageCache {
     protocols: HashMap<(usize, bool), Protocol>,
     current_zoom: f32,
     current_pan: (f32, f32),
+    text_cache: HashMap<usize, String>,
 }
 
 impl PageCache {
@@ -22,6 +23,7 @@ impl PageCache {
             protocols: HashMap::new(),
             current_zoom: 1.0,
             current_pan: (0.0, 0.0),
+            text_cache: HashMap::new(),
         }
     }
 
@@ -30,6 +32,7 @@ impl PageCache {
         self.image_scales.clear();
         self.inverted.clear();
         self.protocols.clear();
+        self.text_cache.clear();
     }
 
     pub fn invalidate_protocols(&mut self) {
@@ -48,6 +51,7 @@ impl PageCache {
         self.image_scales.retain(|&k, _| k >= min && k <= max);
         self.inverted.retain(|&k, _| k >= min && k <= max);
         self.protocols.retain(|&(k, _), _| k >= min && k <= max);
+        self.text_cache.retain(|&k, _| k >= min && k <= max);
     }
 
     pub fn has_image_at_scale(&self, page_idx: usize, scale: f32) -> bool {
@@ -68,6 +72,18 @@ impl PageCache {
         self.images
             .get(&page_idx)
             .map(|img| (img.width(), img.height()))
+    }
+
+    pub fn has_text(&self, page_idx: usize) -> bool {
+        self.text_cache.contains_key(&page_idx)
+    }
+
+    pub fn get_text(&self, page_idx: usize) -> Option<&str> {
+        self.text_cache.get(&page_idx).map(String::as_str)
+    }
+
+    pub fn insert_text(&mut self, page_idx: usize, text: String) {
+        self.text_cache.insert(page_idx, text);
     }
 
     pub fn get_protocol(

@@ -39,6 +39,10 @@ struct Cli {
     /// Layout: 1 (single), 2 (dual), 3 (triple)
     #[arg(short = 'd', long, value_name = "1|2|3")]
     layout: Option<u8>,
+
+    /// Start in text-only mode (works on any terminal)
+    #[arg(short, long)]
+    text: bool,
 }
 
 #[derive(Subcommand)]
@@ -54,15 +58,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return update::self_update();
     }
 
-    let path = match cli.path {
-        Some(p) => p,
-        None => {
-            eprintln!("tpdf - Terminal PDF viewer\n");
-            eprintln!("Usage: tpdf <file.pdf>");
-            eprintln!("       tpdf update\n");
-            eprintln!("Run 'tpdf --help' for more options.");
-            std::process::exit(1);
-        }
+    let Some(path) = cli.path else {
+        eprintln!("tpdf - Terminal PDF viewer\n");
+        eprintln!("Usage: tpdf <file.pdf>");
+        eprintln!("       tpdf update\n");
+        eprintln!("Run 'tpdf --help' for more options.");
+        std::process::exit(1);
+    };
+
+    let (picker, text_mode) = if cli.text {
+        (None, true)
+    } else if let Ok(p) = Picker::from_query_stdio() {
+        (Some(p), false)
+    } else {
+        eprintln!("Note: terminal does not support image protocols, using text mode.");
+        (None, true)
     };
 
     let config = AppConfig {
@@ -74,9 +84,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Some(3) => PageLayout::Triple,
             _ => PageLayout::Single,
         },
+        text_mode,
     };
 
-    let picker = Picker::from_query_stdio()?;
     let (term_cols, term_rows) = crossterm::terminal::size()?;
 
     let mut app = app::App::new(&path, picker, term_cols, term_rows, &config)?;
