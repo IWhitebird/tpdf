@@ -208,8 +208,7 @@ impl App {
             }
 
             let has_pending = self.has_pending_visible();
-            let needs_prewarm =
-                !has_pending && self.has_nearby_unwarmed_protocol();
+            let needs_prewarm = !has_pending && self.has_nearby_unwarmed_protocol();
             let timeout = if has_pending {
                 Duration::from_millis(16)
             } else if needs_prewarm {
@@ -365,8 +364,7 @@ impl App {
         let start = self.current_page.saturating_sub(5);
         let end = (self.current_page + n + 5).min(self.page_count);
         (start..end).any(|idx| {
-            self.cache.image_dims(idx).is_some()
-                && !self.cache.has_protocol(idx, self.dark_mode)
+            self.cache.image_dims(idx).is_some() && !self.cache.has_protocol(idx, self.dark_mode)
         })
     }
 
@@ -382,8 +380,7 @@ impl App {
         let behind_start = self.current_page.saturating_sub(5);
 
         for idx in (start..end).chain(behind_start..self.current_page) {
-            if self.cache.image_dims(idx).is_some()
-                && !self.cache.has_protocol(idx, self.dark_mode)
+            if self.cache.image_dims(idx).is_some() && !self.cache.has_protocol(idx, self.dark_mode)
             {
                 let (w, h) = self.cache.image_dims(idx).unwrap();
                 let page_area = Rect::new(0, 0, per_page_width, usable);
